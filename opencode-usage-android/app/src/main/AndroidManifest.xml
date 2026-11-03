@@ -18,6 +18,13 @@
             </intent-filter>
         </activity>
 
+        <activity android:name=".OpenCodeActivity" android:exported="false" />
+        <activity android:name=".AccountsActivity" android:exported="false" />
+        <activity
+            android:name=".BrowserActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize" />
+
         <receiver
             android:name=".UsageWidget"
             android:exported="false">

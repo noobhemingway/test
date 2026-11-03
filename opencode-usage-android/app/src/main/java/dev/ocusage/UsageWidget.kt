@@ -6,66 +6,56 @@ import android.appwidget.AppWidgetProvider
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.content.res.ColorStateList
-import android.os.Build
 import android.widget.RemoteViews
 
-/** Home-screen widget showing the last numbers fetched in the app. It never contacts the server itself. */
+/** Home-screen widget: the last numbers the app fetched. It never contacts any server itself. */
 class UsageWidget : AppWidgetProvider() {
 
-    override fun onUpdate(ctx: Context, mgr: AppWidgetManager, ids: IntArray) {
-        push(ctx, mgr, ids, Prefs.cached(ctx))
-    }
+    override fun onUpdate(ctx: Context, mgr: AppWidgetManager, ids: IntArray) = push(ctx, mgr, ids)
 
     companion object {
-        /** Redraw every widget from the cache (no network). */
         fun updateAll(ctx: Context) {
             val mgr = AppWidgetManager.getInstance(ctx)
             val ids = mgr.getAppWidgetIds(ComponentName(ctx, UsageWidget::class.java))
-            if (ids.isNotEmpty()) push(ctx, mgr, ids, Prefs.cached(ctx))
+            if (ids.isNotEmpty()) push(ctx, mgr, ids)
         }
 
-        private fun push(ctx: Context, mgr: AppWidgetManager, ids: IntArray, u: Usage?) {
+        private val rows = listOf(
+            Ids.OPENCODE to R.id.w_opencode,
+            Ids.CLAUDE to R.id.w_claude,
+            Ids.CODEX to R.id.w_codex,
+            Ids.GROK to R.id.w_grok,
+        )
+
+        private fun short(label: String) = when (label) {
+            "5-hour" -> "5h"
+            "Weekly" -> "Wk"
+            "Monthly" -> "Mo"
+            else -> label
+        }
+
+        private fun push(ctx: Context, mgr: AppWidgetManager, ids: IntArray) {
             val views = RemoteViews(ctx.packageName, R.layout.widget_usage)
-            val open = PendingIntent.getActivity(
+            views.setOnClickPendingIntent(R.id.w_root, PendingIntent.getActivity(
                 ctx, 0, Intent(ctx, MainActivity::class.java),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-            )
-            views.setOnClickPendingIntent(R.id.w_root, open)
-
-            if (u == null) {
-                for ((pct, bar, reset) in rows()) {
-                    views.setTextViewText(pct, "–")
-                    views.setProgressBar(bar, 1000, 0, false)
-                    views.setTextViewText(reset, "")
+            ))
+            var newest: java.time.Instant? = null
+            for ((id, viewId) in rows) {
+                val snap = Store.snapshot(ctx, id)
+                if (snap == null) {
+                    views.setTextViewText(viewId, "–")
+                    views.setTextColor(viewId, ctx.getColor(R.color.text_muted))
+                    continue
                 }
-                views.setTextViewText(
-                    R.id.w_status,
-                    if (Prefs.apiKey(ctx) == null) "Tap to add your API key" else "Tap to open and refresh",
-                )
-            } else {
-                val meters = listOf(u.rolling, u.weekly, u.monthly)
-                for ((i, ids3) in rows().withIndex()) {
-                    val (pct, bar, reset) = ids3
-                    val m = meters[i]
-                    val color = Ui.color(ctx, m)
-                    views.setTextViewText(pct, Ui.pct(m))
-                    views.setTextColor(pct, if (m.percent >= 70 || m.exceeded) color else ctx.getColor(R.color.text))
-                    views.setProgressBar(bar, 1000, Ui.progress(m), false)
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                        views.setColorStateList(bar, "setProgressTintList", ColorStateList.valueOf(color))
-                    }
-                    views.setTextViewText(reset, m.resetText())
-                }
-                views.setTextViewText(R.id.w_status, "As of ${Ui.time(u.fetchedAt)}")
+                if (newest == null || snap.fetchedAt.isAfter(newest)) newest = snap.fetchedAt
+                views.setTextViewText(viewId, snap.meters.joinToString("  ") { "${short(it.label)} ${Ui.pct(it.percent)}" })
+                val worst = snap.meters.maxByOrNull { it.percent }
+                views.setTextColor(viewId,
+                    if (worst != null && (worst.percent >= 70 || worst.exceeded)) Ui.color(ctx, worst) else ctx.getColor(R.color.text))
             }
+            views.setTextViewText(R.id.w_status, newest?.let { "As of ${Ui.time(it)} · tap to open" } ?: "Tap to open")
             mgr.updateAppWidget(ids, views)
         }
-
-        private fun rows() = listOf(
-            Triple(R.id.w_5h_pct, R.id.w_5h_bar, R.id.w_5h_reset),
-            Triple(R.id.w_week_pct, R.id.w_week_bar, R.id.w_week_reset),
-            Triple(R.id.w_month_pct, R.id.w_month_bar, R.id.w_month_reset),
-        )
     }
 }

@@ -1,14 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">OC Usage</string>
-    <string name="title">OpenCode Go usage</string>
-    <string name="setup_hint">Paste your OpenCode Go API key. Find it at opencode.ai/console. It is stored only on this phone.</string>
-    <string name="key_hint">API key</string>
-    <string name="save">Save key</string>
-    <string name="refresh">Refresh</string>
-    <string name="change_key">Change API key</string>
-    <string name="win_5h">5-hour</string>
-    <string name="win_week">Weekly</string>
-    <string name="win_month">Monthly</string>
-    <string name="widget_desc">OpenCode Go 5-hour, weekly and monthly usage</string>
+    <string name="app_name">AI Usage</string>
+    <string name="dash">–</string>
+    <string name="widget_desc">OpenCode Go, Claude, Codex and Grok usage</string>
 </resources>

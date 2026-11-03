@@ -1,151 +1,133 @@
 package dev.ocusage
 
 import android.app.Activity
-import android.content.res.ColorStateList
+import android.content.Intent
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
-import android.view.View
-import android.view.WindowInsets
 import android.widget.Button
-import android.widget.EditText
-import android.widget.ProgressBar
+import android.widget.LinearLayout
 import android.widget.TextView
-import java.util.concurrent.Executors
 
+/**
+ * Home: one card each for OpenCode Go, Claude, Codex and Grok. Shows saved numbers only;
+ * nothing is fetched until you tap Refresh.
+ */
 class MainActivity : Activity() {
-    private val io = Executors.newSingleThreadExecutor()
-    private val main = Handler(Looper.getMainLooper())
-    private var loading = false
-
-    private lateinit var setupGroup: View
-    private lateinit var usageGroup: View
-    private lateinit var keyInput: EditText
+    private lateinit var cards: LinearLayout
     private lateinit var status: TextView
     private lateinit var refresh: Button
+    private lateinit var runner: WebRunner
+    private lateinit var refresher: Refresher
+    private val errors = mutableMapOf<String, String>()
+    private val updating = mutableSetOf<String>()
+    private var busy = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_main)
+        val (col, hidden) = Ui.screen(this)
+        runner = WebRunner(this, hidden)
+        refresher = Refresher(applicationContext, runner)
 
-        // Keep content clear of the status / navigation bars (edge-to-edge on Android 15).
-        findViewById<View>(R.id.root).setOnApplyWindowInsetsListener { v, insets ->
-            val bars = insets.getInsets(WindowInsets.Type.systemBars())
-            v.setPadding(bars.left, bars.top, bars.right, bars.bottom)
-            insets
+        col.addView(Ui.title(this, "Usage"))
+        cards = Ui.column(this)
+        col.addView(cards)
+        status = Ui.muted(this, "")
+        col.addView(status)
+        refresh = Ui.button(this, "Refresh") { refreshAll() }
+        val accounts = Ui.button(this, "Accounts", borderless = true) {
+            startActivity(Intent(this, AccountsActivity::class.java))
         }
-
-        setupGroup = findViewById(R.id.setupGroup)
-        usageGroup = findViewById(R.id.usageGroup)
-        keyInput = findViewById(R.id.keyInput)
-        status = findViewById(R.id.status)
-        refresh = findViewById(R.id.refresh)
-
-        label(R.id.card5h, R.string.win_5h)
-        label(R.id.cardWeek, R.string.win_week)
-        label(R.id.cardMonth, R.string.win_month)
-
-        findViewById<Button>(R.id.saveKey).setOnClickListener {
-            val key = keyInput.text.toString().trim()
-            if (key.isEmpty()) {
-                keyInput.error = "Enter your API key"
-                return@setOnClickListener
-            }
-            Prefs.setApiKey(this, key)
-            keyInput.setText("")
-            showMode()
-        }
-        refresh.setOnClickListener { load() }
-        findViewById<Button>(R.id.changeKey).setOnClickListener {
-            Prefs.setApiKey(this, null)
-            UsageWidget.updateAll(this)
-            showMode()
-        }
+        col.addView(LinearLayout(this).apply {
+            setPadding(0, Ui.dp(this@MainActivity, 12), 0, 0)
+            addView(refresh)
+            addView(accounts)
+        })
     }
 
     override fun onResume() {
         super.onResume()
-        // Show the last saved numbers only. Fetching happens when you tap Refresh.
-        showMode()
+        render()
     }
 
     override fun onDestroy() {
-        io.shutdownNow()
+        runner.destroy()
+        refresher.close()
         super.onDestroy()
     }
 
-    private fun showMode() {
-        val hasKey = Prefs.apiKey(this) != null
-        setupGroup.visibility = if (hasKey) View.GONE else View.VISIBLE
-        usageGroup.visibility = if (hasKey) View.VISIBLE else View.GONE
-        if (hasKey) {
-            val cached = Prefs.cached(this)
-            if (cached != null) {
-                render(cached)
-                status.text = "As of ${Ui.time(cached.fetchedAt)} · tap Refresh for new numbers"
-            } else {
-                clearCards()
-                status.text = "Tap Refresh to load your usage."
-            }
+    private fun refreshAll() {
+        if (busy) return
+        val ids = Ids.HOME.filter { Store.configured(this, it) }
+        if (ids.isEmpty()) {
+            status.text = "Nothing set up yet. Open Accounts to add your OpenCode key or sign in."
+            return
         }
-    }
-
-    private fun load() {
-        if (loading) return
-        loading = true
+        busy = true
         refresh.isEnabled = false
-        status.text = "Updating…"
-        io.execute {
-            val result = runCatching { Prefs.refresh(applicationContext) }
-            main.post {
-                loading = false
-                if (isDestroyed) return@post
-                refresh.isEnabled = true
-                result.onSuccess { usage ->
-                    render(usage)
-                    status.text = "As of ${Ui.time(usage.fetchedAt)}"
-                    UsageWidget.updateAll(this)
-                }.onFailure { e ->
-                    val msg = (e as? UsageException)?.message
-                        ?: "Couldn't reach opencode.ai (${e.javaClass.simpleName})."
-                    val cached = Prefs.cached(this)
-                    status.text = if (cached != null) "$msg Still showing numbers from ${Ui.time(cached.fetchedAt)}." else msg
+        updating += ids
+        ids.forEach { errors.remove(it) }
+        render()
+        refresher.fetchAll(ids,
+            each = { id, r ->
+                updating -= id
+                r.exceptionOrNull()?.let { errors[id] = it.message ?: it.javaClass.simpleName }
+                if (!isDestroyed) render()
+            },
+            all = {
+                busy = false
+                if (!isDestroyed) {
+                    refresh.isEnabled = true
+                    render()
                 }
+                UsageWidget.updateAll(applicationContext)
+            })
+    }
+
+    private fun render() {
+        cards.removeAllViews()
+        for (id in Ids.HOME) cards.addView(card(id))
+        if (!busy) {
+            status.text = if (Ids.HOME.none { Store.configured(this, it) })
+                "Open Accounts to add your OpenCode key and sign in to Claude, ChatGPT and Grok."
+            else "Numbers update only when you tap Refresh."
+        } else status.text = "Updating…"
+    }
+
+    private fun card(id: String) = Ui.card(this).apply {
+        val ctx = this@MainActivity
+        val configured = Store.configured(ctx, id)
+        val snap = Store.snapshot(ctx, id)
+        val right = when {
+            id in updating -> "Updating…"
+            snap != null -> "As of ${Ui.time(snap.fetchedAt)}"
+            else -> ""
+        }
+        val name = Ui.text(ctx, Ids.title(id), 17f, bold = true)
+        addView(Ui.row(ctx, name, Ui.muted(ctx, right, 12f)))
+
+        when {
+            !configured -> {
+                addView(Ui.muted(ctx, when (id) {
+                    Ids.OPENCODE -> "Not set up · tap to add your API key"
+                    Ids.GROK -> "Not set up · tap to sign in (experimental)"
+                    else -> "Not signed in · tap to sign in"
+                }, 14f).apply { setPadding(0, Ui.dp(ctx, 8), 0, 0) })
+                setOnClickListener { startActivity(Intent(ctx, AccountsActivity::class.java)) }
             }
+            snap == null && errors[id] == null -> addView(Ui.muted(ctx,
+                if (id in updating) "Loading…" else "No numbers yet · tap Refresh", 14f
+            ).apply { setPadding(0, Ui.dp(ctx, 8), 0, 0) })
+        }
+        snap?.meters?.forEach { addView(Ui.meterView(ctx, it)) }
+        errors[id]?.let { msg ->
+            val shown = if (snap != null) "$msg Still showing numbers from ${Ui.time(snap.fetchedAt)}." else msg
+            addView(Ui.text(ctx, shown, 13f, R.color.danger).apply { setPadding(0, Ui.dp(ctx, 10), 0, 0) })
+        }
+        if (id == Ids.OPENCODE && configured) {
+            addView(Ui.text(ctx, "Models and details ›", 14f, R.color.accent).apply {
+                setPadding(0, Ui.dp(ctx, 12), 0, 0)
+            })
+            setOnClickListener { startActivity(Intent(ctx, OpenCodeActivity::class.java)) }
         }
     }
 
-    private fun render(u: Usage) {
-        card(R.id.card5h, u.rolling)
-        card(R.id.cardWeek, u.weekly)
-        card(R.id.cardMonth, u.monthly)
-    }
-
-    private fun label(cardId: Int, textRes: Int) {
-        findViewById<View>(cardId).findViewById<TextView>(R.id.label).setText(textRes)
-    }
-
-    private fun clearCards() {
-        for (id in listOf(R.id.card5h, R.id.cardWeek, R.id.cardMonth)) {
-            val c = findViewById<View>(id)
-            c.findViewById<TextView>(R.id.percent).text = "–"
-            c.findViewById<ProgressBar>(R.id.bar).progress = 0
-            c.findViewById<TextView>(R.id.reset).text = ""
-        }
-    }
-
-    private fun card(cardId: Int, m: Meter) {
-        val c = findViewById<View>(cardId)
-        val color = Ui.color(this, m)
-        c.findViewById<TextView>(R.id.percent).apply {
-            text = Ui.pct(m)
-            setTextColor(if (m.percent >= 70 || m.exceeded) color else getColor(R.color.text))
-        }
-        c.findViewById<ProgressBar>(R.id.bar).apply {
-            progress = Ui.progress(m)
-            progressTintList = ColorStateList.valueOf(color)
-        }
-        c.findViewById<TextView>(R.id.reset).text =
-            if (m.exceeded) "Limit reached · ${m.resetText()}" else m.resetText()
-    }
 }

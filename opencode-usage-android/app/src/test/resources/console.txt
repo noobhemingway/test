@@ -1,0 +1,56 @@
+Activity
+My usage
+Usage
+Logs
+Audit
+18%
+Go usage · Renews Dec 3
+150%
+100%
+50%
+0%
+NOV 3
+NOV 12
+NOV 22
+DEC 3
+Usage
+Monthly limit
+Logs
+Last 40 requests
+200
+iceman-contributor-free · noobhemi...
+10h ago
+200
+iceman-contributor-free · noobhemi...
+10h ago
+Limits
+When your Go usage resets
+Rolling
+Starts on first use
+0% used
+Weekly
+Resets in 5d 7h
+35% used
+Monthly
+Resets in 29d 10h
+18% used
+Models
+Most used this period
+GO
+Grok 4.7
+78%
+GO
+Iceman Contributor Free
+17%
+GO
+GPT-6 Luna
+5%
+Requests
+58
+Tokens
+4.3M
+Extra usage
+Off · Requests pause at a limit
+Available credit
+$0.00
+Keep working past a limit · Turn on in Go

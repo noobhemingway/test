@@ -11,8 +11,8 @@ android {
         applicationId = "dev.ocusage"
         minSdk = 30
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "2.0"
     }
 
     buildTypes {
@@ -24,6 +24,9 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+    }
     kotlinOptions {
         jvmTarget = "17"
     }
@@ -32,4 +35,5 @@ android {
 dependencies {
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303") // real org.json for JVM tests
+    testImplementation("org.robolectric:robolectric:4.14.1") // screenshots of screens, no emulator
 }
