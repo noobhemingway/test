@@ -10,22 +10,11 @@ import android.content.res.ColorStateList
 import android.os.Build
 import android.widget.RemoteViews
 
-/** Home-screen widget showing the three windows. Refreshes about every 30 min (Android's minimum). */
+/** Home-screen widget showing the last numbers fetched in the app. It never contacts the server itself. */
 class UsageWidget : AppWidgetProvider() {
 
     override fun onUpdate(ctx: Context, mgr: AppWidgetManager, ids: IntArray) {
-        // Show cached numbers immediately, then fetch fresh ones in the background.
-        push(ctx, mgr, ids, Prefs.cached(ctx), null)
-        if (Prefs.apiKey(ctx) == null) return
-        val pending = goAsync()
-        Thread {
-            try {
-                val result = runCatching { Prefs.refresh(ctx) }
-                push(ctx, mgr, ids, result.getOrNull() ?: Prefs.cached(ctx), result.exceptionOrNull())
-            } finally {
-                pending.finish()
-            }
-        }.start()
+        push(ctx, mgr, ids, Prefs.cached(ctx))
     }
 
     companion object {
@@ -33,10 +22,10 @@ class UsageWidget : AppWidgetProvider() {
         fun updateAll(ctx: Context) {
             val mgr = AppWidgetManager.getInstance(ctx)
             val ids = mgr.getAppWidgetIds(ComponentName(ctx, UsageWidget::class.java))
-            if (ids.isNotEmpty()) push(ctx, mgr, ids, Prefs.cached(ctx), null)
+            if (ids.isNotEmpty()) push(ctx, mgr, ids, Prefs.cached(ctx))
         }
 
-        private fun push(ctx: Context, mgr: AppWidgetManager, ids: IntArray, u: Usage?, error: Throwable?) {
+        private fun push(ctx: Context, mgr: AppWidgetManager, ids: IntArray, u: Usage?) {
             val views = RemoteViews(ctx.packageName, R.layout.widget_usage)
             val open = PendingIntent.getActivity(
                 ctx, 0, Intent(ctx, MainActivity::class.java),
@@ -52,7 +41,7 @@ class UsageWidget : AppWidgetProvider() {
                 }
                 views.setTextViewText(
                     R.id.w_status,
-                    if (Prefs.apiKey(ctx) == null) "Tap to add your API key" else "Loading…",
+                    if (Prefs.apiKey(ctx) == null) "Tap to add your API key" else "Tap to open and refresh",
                 )
             } else {
                 val meters = listOf(u.rolling, u.weekly, u.monthly)
@@ -68,8 +57,7 @@ class UsageWidget : AppWidgetProvider() {
                     }
                     views.setTextViewText(reset, m.resetText())
                 }
-                val stamp = "Updated ${Ui.time(u.fetchedAt)}"
-                views.setTextViewText(R.id.w_status, if (error != null) "$stamp · offline" else stamp)
+                views.setTextViewText(R.id.w_status, "As of ${Ui.time(u.fetchedAt)}")
             }
             mgr.updateAppWidget(ids, views)
         }

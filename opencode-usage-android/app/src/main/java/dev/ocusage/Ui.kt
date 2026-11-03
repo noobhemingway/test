@@ -23,6 +23,12 @@ object Ui {
     /** Progress value for a bar with max = 1000. */
     fun progress(m: Meter): Int = (m.percent.coerceIn(0.0, 100.0) * 10).toInt()
 
-    fun time(at: Instant): String =
-        at.atZone(ZoneId.systemDefault()).format(DateTimeFormatter.ofPattern("HH:mm"))
+    /** "14:05" for today, "Mon 3 Nov, 14:05" for older fetches, so stale numbers are obvious. */
+    fun time(at: Instant): String {
+        val zone = ZoneId.systemDefault()
+        val local = at.atZone(zone)
+        val today = Instant.now().atZone(zone).toLocalDate()
+        val pattern = if (local.toLocalDate() == today) "HH:mm" else "EEE d MMM, HH:mm"
+        return local.format(DateTimeFormatter.ofPattern(pattern))
+    }
 }

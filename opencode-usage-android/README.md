@@ -33,9 +33,16 @@ browser or file manager. Requires Android 11+.
 
 ## Widget
 
-Long-press the home screen → Widgets → **OC Usage**. It refreshes about every
-30 minutes (Android's minimum for widgets) and whenever you open the app.
-Tap it to open the app.
+Long-press the home screen → Widgets → **OC Usage**. The widget shows the last
+numbers the app fetched and never contacts the server itself. Tap it to open
+the app.
+
+## Manual refresh only
+
+The app never checks in the background. It contacts opencode.ai only when you
+tap **Refresh**: not on launch, not when you save your key, and never from the
+widget. Every screen shows when the numbers were fetched ("As of 14:05", or
+with the date if older than today).
 
 ## Build
 

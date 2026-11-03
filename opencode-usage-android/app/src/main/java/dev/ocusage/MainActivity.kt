@@ -54,7 +54,6 @@ class MainActivity : Activity() {
             Prefs.setApiKey(this, key)
             keyInput.setText("")
             showMode()
-            load()
         }
         refresh.setOnClickListener { load() }
         findViewById<Button>(R.id.changeKey).setOnClickListener {
@@ -66,8 +65,8 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        // Show the last saved numbers only. Fetching happens when you tap Refresh.
         showMode()
-        if (Prefs.apiKey(this) != null) load()
     }
 
     override fun onDestroy() {
@@ -83,9 +82,10 @@ class MainActivity : Activity() {
             val cached = Prefs.cached(this)
             if (cached != null) {
                 render(cached)
-                status.text = "Last updated ${Ui.time(cached.fetchedAt)}"
+                status.text = "As of ${Ui.time(cached.fetchedAt)} · tap Refresh for new numbers"
             } else {
                 clearCards()
+                status.text = "Tap Refresh to load your usage."
             }
         }
     }
@@ -103,13 +103,13 @@ class MainActivity : Activity() {
                 refresh.isEnabled = true
                 result.onSuccess { usage ->
                     render(usage)
-                    status.text = "Updated ${Ui.time(usage.fetchedAt)}"
+                    status.text = "As of ${Ui.time(usage.fetchedAt)}"
                     UsageWidget.updateAll(this)
                 }.onFailure { e ->
                     val msg = (e as? UsageException)?.message
                         ?: "Couldn't reach opencode.ai (${e.javaClass.simpleName})."
                     val cached = Prefs.cached(this)
-                    status.text = if (cached != null) "$msg Showing data from ${Ui.time(cached.fetchedAt)}." else msg
+                    status.text = if (cached != null) "$msg Still showing numbers from ${Ui.time(cached.fetchedAt)}." else msg
                 }
             }
         }
