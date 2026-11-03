@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="bg">#121212</color>
+    <color name="card">#1E1E1E</color>
+    <color name="text">#EDEDEA</color>
+    <color name="text_muted">#A0A09A</color>
+    <color name="track">#333331</color>
+    <color name="accent">#5B8DEF</color>
+    <color name="warn">#E3A82B</color>
+    <color name="danger">#F0625A</color>
+</resources>
