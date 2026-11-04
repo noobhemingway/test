@@ -120,8 +120,8 @@ object Ui {
         }
 
     /**
-     * Standard screen: a scrolling column with system-bar insets, plus a hidden 1px slot
-     * for the WebRunner. Returns (column, hiddenSlot).
+     * Standard screen: a scrolling column with system-bar insets, plus a layer behind it
+     * for the WebRunner. Returns (column, webLayer).
      */
     fun screen(a: Activity): Pair<LinearLayout, FrameLayout> {
         val col = column(a).apply {
@@ -131,7 +131,8 @@ object Ui {
         val scroll = ScrollView(a).apply { isFillViewport = true; addView(col) }
         val hidden = FrameLayout(a)
         val root = FrameLayout(a).apply {
-            addView(hidden, FrameLayout.LayoutParams(1, 1))
+            // Full-size layer for the WebRunner, kept behind the content until a site needs you.
+            addView(hidden, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
             addView(scroll, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
             setOnApplyWindowInsetsListener { v, insets ->
                 val b = insets.getInsets(WindowInsets.Type.systemBars())

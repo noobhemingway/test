@@ -33,16 +33,20 @@ class Refresher(private val ctx: Context, private val runner: WebRunner) {
                     main.post { done(r) }
                 }
             }
-            Ids.CLAUDE -> runner.run(Jobs.CLAUDE_URL, Jobs.CLAUDE_JS, 30_000, done)
-            Ids.CODEX -> runner.run(Jobs.CODEX_URL, Jobs.CODEX_JS, 30_000, done)
+            Ids.CLAUDE -> runner.run(Jobs.CLAUDE_URL, Jobs.CLAUDE_JS, 30_000, "Claude",
+                revealUrl = "https://claude.ai/", validate = { Parsers.claude(it, Instant.now()) }, cb = done)
+            Ids.CODEX -> runner.run(Jobs.CODEX_URL, Jobs.CODEX_JS, 30_000, "ChatGPT",
+                revealUrl = "https://chatgpt.com/", validate = { Parsers.codex(it, Instant.now()) }, cb = done)
             Ids.GROK -> {
                 val url = Store.pageUrl(ctx, Ids.GROK)
                     ?: return cb(Result.failure(UsageException("Choose Grok's usage page in Accounts first.")))
-                runner.run(url, Jobs.GROK_JS, 35_000, done)
+                runner.run(url, Jobs.GROK_JS, 35_000, "Grok",
+                    revealUrl = null, validate = { Parsers.grok(it, Instant.now()) }, cb = done)
             }
             Ids.CONSOLE -> {
                 val url = Store.pageUrl(ctx, Ids.CONSOLE) ?: Jobs.CONSOLE_DEFAULT_URL
-                runner.run(url, Jobs.CONSOLE_JS, 35_000, done)
+                runner.run(url, Jobs.CONSOLE_JS, 35_000, "The OpenCode console",
+                    revealUrl = null, validate = { Parsers.console(it, Instant.now()) }, cb = done)
             }
         }
     }

@@ -20,6 +20,15 @@ Nothing runs in the background. The app contacts a site only when you tap
 **Refresh**: not on launch, not after signing in, and never from the widget.
 Every number shows when it was fetched ("As of 14:05", with the date if older).
 
+## When a site needs you
+
+Refresh normally reads each site invisibly. If a site shows a "verify you're
+human" check, signs you out, or shows a page the app can't read, that site comes
+up full screen instead of failing. Sign in or tap through the check, then tap
+**Continue**. For Grok and the OpenCode console, Continue reads the page you're
+on, so you can also navigate to the right tab first. If it still can't read the
+numbers, the card shows the error. **Cancel** (or Back) skips that site.
+
 ## Setup (Accounts)
 
 - **OpenCode Go API key**: from opencode.ai/console.

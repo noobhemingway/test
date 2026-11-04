@@ -5,34 +5,60 @@ import android.content.Context
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import android.view.Gravity
+import android.view.View
 import android.view.ViewGroup
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.FrameLayout
+import android.widget.LinearLayout
 import org.json.JSONObject
 import java.util.UUID
 
 /**
- * A hidden WebView that shares cookies with the sign-in browser. For each job it opens a page on
- * the provider's own site, runs a small script there (so requests go out exactly like the site's
- * own, with your session), and hands back the result. One job at a time.
+ * A browser layer that shares cookies with the sign-in browser. Normally invisible: for each job
+ * it opens a page on the provider's own site, runs a small script there (so requests go out
+ * exactly like the site's own, with your session) and hands back the result.
+ *
+ * If that fails (a "verify you're human" check, a sign-in page, or a page it can't read), the
+ * layer comes to the front showing the site, so you can deal with it and tap Continue. The job
+ * then runs once more; if it still fails, the error is reported. One job at a time.
  */
 @SuppressLint("SetJavaScriptEnabled")
-class WebRunner(ctx: Context, container: ViewGroup) {
+class WebRunner(ctx: Context, private val overlay: FrameLayout) {
+    private class Job(
+        val url: String,
+        val body: String,
+        val timeoutMs: Long,
+        val title: String,
+        /** Page to show when you're needed; null = keep the page the job is on (page-reading jobs). */
+        val revealUrl: String?,
+        /** Throws if the result can't be read. */
+        val validate: (String) -> Unit,
+        val cb: (Result<String>) -> Unit,
+    ) {
+        var revealed = false
+    }
+
     private val main = Handler(Looper.getMainLooper())
     private val web = WebView(ctx)
+    private val panel = LinearLayout(ctx)
+    private val message = Ui.text(ctx, "", 14f)
+    private var job: Job? = null
     private var token: String? = null
     private var script: String? = null
     private var host: String? = null
-    private var callback: ((Result<String>) -> Unit)? = null
     private var timeout: Runnable? = null
 
+    /** True while the site is on screen waiting for you. */
+    val isRevealed: Boolean get() = job?.revealed == true && script == null && token == null
+
     init {
-        container.addView(web, ViewGroup.LayoutParams(1, 1))
-        web.alpha = 0f
         web.settings.javaScriptEnabled = true
         web.settings.domStorageEnabled = true
+        web.settings.javaScriptCanOpenWindowsAutomatically = true
         CookieManager.getInstance().setAcceptCookie(true)
         CookieManager.getInstance().setAcceptThirdPartyCookies(web, true)
         web.addJavascriptInterface(Bridge(), "OCBridge")
@@ -44,35 +70,143 @@ class WebRunner(ctx: Context, container: ViewGroup) {
                 view.evaluateJavascript(s, null)
             }
         }
+
+        val bar = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(ctx.getColor(R.color.card))
+            val p = Ui.dp(ctx, 12)
+            setPadding(p + Ui.dp(ctx, 4), p, p, Ui.dp(ctx, 4))
+            addView(message)
+            addView(LinearLayout(ctx).apply {
+                gravity = Gravity.END
+                addView(Ui.button(ctx, "Cancel", borderless = true) { cancel() })
+                addView(Ui.button(ctx, "Continue") { resume() })
+            })
+        }
+        panel.orientation = LinearLayout.VERTICAL
+        panel.addView(bar)
+        panel.addView(web, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        overlay.addView(panel, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        hide()
     }
 
     inner class Bridge {
         @JavascriptInterface
         fun post(tok: String, payload: String) {
-            main.post { if (tok == token) finish(decode(payload)) }
+            main.post { if (tok == token) handle(decode(payload)) }
         }
     }
 
-    fun run(url: String, body: String, timeoutMs: Long, cb: (Result<String>) -> Unit) {
+    fun run(
+        url: String, body: String, timeoutMs: Long, title: String, revealUrl: String?,
+        validate: (String) -> Unit, cb: (Result<String>) -> Unit,
+    ) {
+        job?.let { complete(Result.failure(UsageException("Interrupted."))) }
+        job = Job(url, body, timeoutMs, title, revealUrl, validate, cb)
+        attempt(reload = true)
+    }
+
+    /** Runs the job's script, either after loading its page or right on the page that's open. */
+    private fun attempt(reload: Boolean) {
+        val j = job ?: return
         val tok = UUID.randomUUID().toString()
         token = tok
-        host = Uri.parse(url).host
-        callback = cb
-        script = """
+        host = Uri.parse(j.url).host
+        val wrapped = """
             (async () => {
               let out;
-              try { out = { ok: true, data: await (async () => { $body })() }; }
+              try { out = { ok: true, data: await (async () => { ${j.body} })() }; }
               catch (e) { out = { ok: false, error: String((e && e.message) || e) }; }
               OCBridge.post('$tok', JSON.stringify(out));
             })();
         """.trimIndent()
         timeout = Runnable {
             val onSite = Uri.parse(web.url ?: "").host == host
-            finish(Result.failure(UsageException(
+            token = null
+            script = null
+            handle(Result.failure(UsageException(
                 if (onSite) "Timed out waiting for the site." else "Not signed in. Sign in again in Accounts."
             )))
-        }.also { main.postDelayed(it, timeoutMs) }
-        web.loadUrl(url)
+        }.also { main.postDelayed(it, j.timeoutMs) }
+        if (reload) {
+            script = wrapped
+            web.loadUrl(j.url)
+        } else {
+            script = null
+            web.evaluateJavascript(wrapped, null)
+        }
+    }
+
+    private fun handle(r: Result<String>) {
+        timeout?.let { main.removeCallbacks(it) }
+        timeout = null
+        token = null
+        script = null
+        val j = job ?: return
+        val readable = r.isSuccess && runCatching { j.validate(r.getOrThrow()) }.isSuccess
+        if (readable || j.revealed) complete(r) else reveal(j, r.exceptionOrNull()?.message)
+    }
+
+    private fun reveal(j: Job, reason: String?) {
+        j.revealed = true
+        message.text = buildString {
+            append("${j.title} needs you. Sign in or finish any check, then tap Continue.")
+            if (!reason.isNullOrBlank()) append("\n($reason)")
+        }
+        show()
+        val current = web.url
+        when {
+            j.revealUrl != null -> web.loadUrl(j.revealUrl)
+            current == null || current == "about:blank" -> web.loadUrl(j.url)
+            // else: keep the page that's already open (the one we couldn't read)
+        }
+    }
+
+    /** Continue: read from the page you're on if it's the right site, otherwise load the job's page again. */
+    private fun resume() {
+        val j = job ?: return
+        if (!isRevealed) return
+        hide()
+        val onSite = Uri.parse(web.url ?: "").host == Uri.parse(j.url).host
+        attempt(reload = !(j.revealUrl == null && onSite))
+    }
+
+    fun cancel() {
+        if (job != null) complete(Result.failure(UsageException("Cancelled.")))
+    }
+
+    private fun complete(r: Result<String>) {
+        timeout?.let { main.removeCallbacks(it) }
+        timeout = null
+        token = null
+        script = null
+        val j = job
+        job = null
+        hide()
+        web.loadUrl("about:blank")
+        j?.cb?.invoke(r)
+    }
+
+    private fun show() {
+        panel.alpha = 1f
+        panel.getChildAt(0).visibility = View.VISIBLE
+        overlay.setBackgroundColor(overlay.context.getColor(R.color.bg))
+        overlay.isClickable = true
+        overlay.bringToFront()
+    }
+
+    /** Invisible and behind the screen's content, but still full size so pages render normally. */
+    private fun hide() {
+        panel.alpha = 0f
+        panel.getChildAt(0).visibility = View.GONE
+        overlay.background = null
+        overlay.isClickable = false
+        val parent = overlay.parent as? ViewGroup ?: return
+        if (parent.indexOfChild(overlay) != 0) {
+            val lp = overlay.layoutParams
+            parent.removeView(overlay)
+            parent.addView(overlay, 0, lp)
+        }
     }
 
     private fun decode(payload: String): Result<String> = runCatching {
@@ -88,27 +222,16 @@ class WebRunner(ctx: Context, container: ViewGroup) {
             throw UsageException(
                 when {
                     err.contains("NOT_SIGNED_IN") || err.contains("HTTP 401") || err.contains("HTTP 403") ->
-                        "Signed out. Sign in again in Accounts."
+                        "Signed out, or blocked by a check."
                     else -> err.ifEmpty { "Unknown error from the site." }
                 }
             )
         }
     }
 
-    private fun finish(r: Result<String>) {
-        timeout?.let { main.removeCallbacks(it) }
-        timeout = null
-        token = null
-        script = null
-        val cb = callback
-        callback = null
-        web.loadUrl("about:blank")
-        cb?.invoke(r)
-    }
-
     fun destroy() {
         timeout?.let { main.removeCallbacks(it) }
-        callback = null
+        job = null
         web.destroy()
     }
 }

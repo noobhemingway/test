@@ -48,6 +48,14 @@ class MainActivity : Activity() {
         render()
     }
 
+    @Deprecated("Back closes a site that's waiting for you before leaving the screen.")
+    override fun onBackPressed() {
+        if (runner.isRevealed) runner.cancel() else {
+            @Suppress("DEPRECATION")
+            super.onBackPressed()
+        }
+    }
+
     override fun onDestroy() {
         runner.destroy()
         refresher.close()
